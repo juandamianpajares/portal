@@ -1,0 +1,591 @@
+<?xml version="1.0" encoding="utf-8"?>
+<s:Application xmlns:fx="http://ns.adobe.com/mxml/2009"
+			   xmlns:s="library://ns.adobe.com/flex/spark"
+			   xmlns:mx="library://ns.adobe.com/flex/mx"
+			   xmlns:views="rtmfptest.views.*"
+			   backgroundColor="#F2F0F0"
+			   width="450"
+			   height="660" creationComplete="init()" xmlns:local="*">
+	<fx:Declarations>
+		
+	</fx:Declarations>
+	
+	<fx:Style>
+		.header { 
+			fontSize: 24px;
+		}
+	</fx:Style>
+	
+	<fx:Script>
+		<![CDATA[
+			import mx.core.UIComponent;
+			import mx.utils.StringUtil;
+
+			private var nc:NetConnection;
+			private var cam:Camera;
+			private var mic:Microphone;
+			private var videoFarEnd:Video;
+			private var videoFarEndOrientation:Number;
+			private var publishStream:NetStream;
+			private var subscribeStream:NetStream;
+			private var subscribeStreamObject:Object;
+			private var scheduledPublish:Boolean;
+			
+			private function init():void{			
+				
+				if (ExternalInterface.available) {
+					try {
+						var href:String = ExternalInterface.call("window.location.href.toString");
+						var hostname:String = ExternalInterface.call("window.location.hostname.toString");
+						connectUrl.text = "rtmp://" + hostname + ":1935";
+					} catch (error:Error) {
+						Logger.info(error.message);
+					}
+				} else {
+					Logger.info("Error during set callback");
+				}
+				cam = Camera.getCamera();
+				videoMy.attachCamera(cam);
+				mic = Microphone.getEnhancedMicrophone();
+				videoFarEnd = new Video();
+				videoFarEndOrientation = 0;
+				var container:UIComponent = new UIComponent();
+				container.addChild(videoFarEnd);
+				canvas.addChild(container);
+				playBtn.enabled = false;
+				publishBtn.enabled = false;
+				stopBtn.visible = false;
+				unpublishBtn.visible = false;
+				disconnectBtn.visible = false;
+				var streamName:String = generateRandomString(4);
+				publishStreamName.text = "Stream-"+streamName;
+				playStreamName.text = "Stream-"+streamName;
+				
+			}
+			
+			// Reset button's state, clear status
+			private function reset():void {
+				connectBtn.visible = true;
+				disconnectBtn.visible = false;
+				
+				unpublishBtn.visible = false;
+				
+				publishBtn.enabled = false;
+				publishBtn.visible = true;
+
+				playBtn.visible = true;
+				playBtn.enabled = false;
+				
+				stopBtn.visible = false;
+
+				enablePublishCheckboxes();
+				
+				setPublishStatus("");
+				setPlayStatus("");
+			}
+			
+			private function initCam():void{				
+				cam.setMode(int(camWidth.text),int(camHeight.text),int(camFPS.text),true);
+				cam.setQuality(0,int(camQuality.text));								
+				cam.setKeyFrameInterval(int(camKeyFrame.text));
+				cam.setMotionLevel(0,2000);
+				Logger.info("Cam initialized "+cam.width+"x"+cam.height);
+			}
+			
+			private function initMic():void{
+				var options:MicrophoneEnhancedOptions = new MicrophoneEnhancedOptions();
+				options.mode = MicrophoneEnhancedMode.FULL_DUPLEX;
+				options.echoPath = 128;
+				options.nonLinearProcessing = true;
+				mic.codec = SoundCodec.SPEEX;
+				mic.encodeQuality = 5;
+				mic.framesPerPacket=1;
+				mic.gain=50;
+				mic.setSilenceLevel(0,2000);
+				mic.enhancedOptions = options;
+				Logger.info("Mic initialized");
+			}
+			
+			/**
+			 * **************************
+			 * 		CONNECT / DISCONNECT
+			 * **************************
+			 **/
+			private function connect():void{
+				var url:String = StringUtil.trim(connectUrl.text);
+				Logger.info("connect " + url);
+				nc = new NetConnection();
+				//if (url.indexOf("rtmp") == 0){
+				//nc.objectEncoding = ObjectEncoding.AMF0;
+				//}
+				nc.client = this;
+				nc.addEventListener(NetStatusEvent.NET_STATUS, handleConnectionStatus);				
+				var obj:Object = new Object();
+				obj.login = generateRandomString(20);
+				obj.appKey  = "flashStreamingApp";
+				nc.connect(url,obj);
+			}
+			
+			
+			
+			//disconnect
+			private function disconnect():void{
+				Logger.info("disconnect");
+				publishStream = null;
+				nc.close();				
+			}
+			
+			private function handleConnectionStatus(event:NetStatusEvent):void{
+				Logger.info("handleConnectionStatus: "+event.info.code);				
+				if (event.info.code=="NetConnection.Connect.Success"){
+					Logger.info("near id: "+nc.nearID);				
+					Logger.info("far id: "+nc.farID);
+					Logger.info("Connection opened");
+					disconnectBtn.visible = true;
+					connectBtn.visible = false;
+					playBtn.enabled = true;
+					publishBtn.enabled = true;
+					setConnectionStatus("CONNECTED");
+				} else if (event.info.code=="NetConnection.Connect.Closed" || event.info.code=="NetConnection.Connect.Failed"){					
+					nc.removeEventListener(NetStatusEvent.NET_STATUS,handleConnectionStatus);
+					unpublish();
+					stop();
+					Logger.info("Connection closed");
+					setConnectionStatus("DISCONNECTED");
+					reset();		
+				}
+			}
+			
+			private function setConnectionStatus(event:String): void {
+				connectionStatus.text = event;
+			}
+			
+			/**
+			 * *************************
+			 * 		PUBLISH / UNPUBLISH
+			 * *************************
+			 **/			 
+			private function publish():void{
+				if (publishStreamName.text == "") {
+					publishStatus.text = "Empty stream name";
+					publishStatus.setStyle("color","#FF0000");
+					return;
+				}
+				disablePublishButtons();
+                disablePublishCheckboxes();
+				publishStatus.setStyle("color","#000000");
+				Logger.info("publish audio: "+publishAudio.selected+" video: "+publishVideo.selected);
+				publishStream = new NetStream(nc);
+				initMic();
+				if (publishAudio.selected){					
+					publishStream.attachAudio(mic);
+					Logger.info("Init audio stream");
+				}
+				initCam();
+				if (publishVideo.selected){					
+					publishStream.attachCamera(cam);
+					if (videoCodec.selectedItem == "H264") {
+					    Logger.info("Video codec H264");
+					    addH264();
+					} else {
+					    Logger.info("Video codec FLV");
+					}
+					Logger.info("Init video stream");
+				}
+				addListenerAndPublish();
+				Logger.info("Publishing");
+			}
+			
+			//unpublish
+			private function unpublish():void{
+				Logger.info("unpublish");
+				disablePublishButtons();
+				disablePublishCheckboxes();
+				if (publishStream!=null){
+					publishStream.close();
+				}
+				videoFarEnd.clear();
+			}
+			
+			private function addListenerAndPublish():void{
+				publishStream.videoReliable=true;
+				publishStream.audioReliable=false;
+				publishStream.useHardwareDecoder=true;				
+				publishStream.addEventListener(NetStatusEvent.NET_STATUS, handleStreamStatus);
+				publishStream.bufferTime=0;				
+				publishStream.publish(publishStreamName.text);
+			}
+			
+			public function addH264():void{
+				var videoStreamSettings:H264VideoStreamSettings = new H264VideoStreamSettings();
+				videoStreamSettings.setProfileLevel(H264Profile.MAIN,H264Level.LEVEL_3_1);						
+				publishStream.videoStreamSettings = videoStreamSettings;
+			}
+			
+			private function setPublishStatus(event:String): void {
+				publishStatus.text = event;
+			}
+
+			private function rotate(degree:Number):void {
+			    var metaDataObj:Object = new Object();
+			    switch(degree) {
+                    case 0:
+                        Logger.info("rotate camera to 0");
+                        metaDataObj.orientation = 0;
+                        break;
+                    case 90:
+                        Logger.info("rotate camera to 90");
+                        metaDataObj.orientation = 1;
+                        break;
+                    case 180:
+                        Logger.info("rotate camera to 180");
+                        metaDataObj.orientation = 2;
+                        break;
+                    case 270:
+                        Logger.info("rotate camera to 270");
+                        metaDataObj.orientation = 3;
+                        break;
+                    default:
+                        metaDataObj.orientation = 0;
+                        break;
+			    }
+			    sendMetaData(metaDataObj);
+			}
+
+			private function sendMetaData(data:Object):void{
+			    if (publishStream != null) {
+			        publishStream.send("@setDataFrame", "onMetaData", data);
+			    }
+			}
+
+			/**
+			 * *************************
+			 * 		PLAY / STOP
+			 * *************************
+			 **/
+			private function play():void{
+				if (playStreamName.text == "") {
+					playStatus.text = "Empty stream name";
+					playStatus.setStyle("color","#ff0000");
+					return;
+				}
+				playBtn.enabled = false;
+				playStatus.setStyle("color","#000000");
+				Logger.info("play");
+				subscribeStream = new NetStream(nc);
+				subscribeStream.client = this;
+				addListenerAndPlay();
+			}
+			
+			private function stop():void{
+				if (subscribeStream != null) {
+					stopBtn.enabled = false;
+					subscribeStream.close();
+					subscribeStream = null;
+				}
+				subscribeStreamObject = null;
+				videoFarEnd.visible = false;
+			}
+			
+			private function addListenerAndPlay():void{
+				subscribeStream.videoReliable=true;
+				subscribeStream.audioReliable=false;
+				subscribeStream.useHardwareDecoder=true;				
+				subscribeStream.addEventListener(NetStatusEvent.NET_STATUS, handleSubscribeStreamStatus);
+				if (playStreamName.text.indexOf("rtsp://") != -1) {
+					subscribeStream.bufferTime=0.5;
+				} else {
+					subscribeStream.bufferTime=0.0;
+				}
+				var soundTransform:SoundTransform = new SoundTransform();	
+				soundTransform.volume=0.7;
+				subscribeStream.soundTransform = soundTransform;	
+				subscribeStreamObject = createStreamObject();
+				subscribeStream.play(playStreamName.text);
+				videoFarEnd.attachNetStream(subscribeStream);
+                videoFarEnd.x = 0;
+                videoFarEnd.y = 0;
+				videoFarEnd.rotation = 0;
+				videoFarEndOrientation = 0;
+				videoFarEnd.width = 320;
+				videoFarEnd.height = 240;
+				videoFarEnd.visible = true;
+			}
+			
+			private function createStreamObject():Object{
+				var ret:Object = new Object();
+				ret.mediaSessionId = generateRandomString(8);
+				ret.name = playStreamName.text;
+				return ret; 
+			}
+			
+			private function generateRandomString(strlen:Number):String{
+				var chars:String = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+				var num_chars:Number = chars.length - 1;
+				var randomChar:String = "";
+				
+				for (var i:Number = 0; i < strlen; i++){
+					randomChar += chars.charAt(Math.floor(Math.random() * num_chars));
+				}
+				return randomChar;
+			}
+			
+			private function setPlayStatus(event:String): void {
+				playStatus.text = event;
+			}
+			
+			/**
+			 * ****************************
+			 * 		HANDLE CONNECTION STATE
+			 * ****************************
+			 **/
+			
+			private function handleStreamStatus(event:NetStatusEvent):void{
+				Logger.info("handleStreamStatus: "+event.info.code);
+				enablePublishButtons();
+				enablePublishCheckboxes();
+				switch (event.info.code) {
+					case "NetStream.Failed":
+						Logger.info("Publish failed");
+						if (publishStream!=null){
+							publishStream.close();
+							publishStream.removeEventListener(NetStatusEvent.NET_STATUS, handleStreamStatus);
+							publishStream=null;
+						}
+						videoFarEnd.clear();
+						setPublishStatus("PUBLISH STREAM FAILED");
+						break;
+					case "NetStream.Publish.BadName":
+						Logger.info("Bad streamName. Please publish stream with other name");
+						setPublishStatus("PUBLISH STREAM FAILED");
+						break;
+					case "NetStream.Unpublish.Success":
+					    if(scheduledPublish) {
+					        scheduledPublish = false;
+					        publish();
+					        return;
+					    }
+						publishStream.removeEventListener(NetStatusEvent.NET_STATUS, handleStreamStatus);
+						publishStream=null;	
+						setPublishStatus("UNPUBLISHED");
+						publishBtn.visible = true;
+						unpublishBtn.visible = false;
+						break;
+					case "NetStream.Publish.Start":
+						setPublishStatus("PUBLISHING");
+						publishBtn.visible = false;
+                        unpublishBtn.visible = true;
+						break;
+				}		
+			}
+			
+			private function handleSubscribeStreamStatus(event:NetStatusEvent):void{
+				Logger.info("handleSubscribeStreamStatus: "+event.info.code);
+				switch (event.info.code) {
+					case "NetStream.Play.PublishNotify":
+					case "NetStream.Play.Start": 
+						setPlayStatus("PLAYING");
+						playBtn.visible = false;
+						stopBtn.enabled = true;
+						stopBtn.visible = true;
+						break;
+					case "NetStream.Play.UnpublishNotify":
+					case "NetStream.Play.Stop":
+						setPlayStatus("STOPPED");
+						playBtn.enabled = true;
+						playBtn.visible = true;
+						stopBtn.visible = false;
+						break;
+					case "NetStream.Play.StreamNotFound":
+						setPlayStatus("STREAM NOT FOUND");
+						playBtn.enabled = true;
+						playBtn.visible = true;
+						stopBtn.visible = false;
+						break;
+					case "NetStream.Play.Failed":
+						setPlayStatus("STREAM FAILED");
+						playBtn.enabled = true;
+						playBtn.visible = true;
+						stopBtn.visible = false;
+						break;
+				}
+			}
+			
+			private function asyncErrorHandler(event: AsyncErrorEvent):void{
+				Logger.info("asyncErrorHandler: "+event);					
+			}
+			
+			private function securityErrorHandler(event: SecurityErrorEvent):void{
+				Logger.info("securityErrorHandler: "+event);					
+			}		
+			public function ping():void{
+				nc.call("pong", null);
+			}
+			
+			public function OnDataEvent(data:Object):void{
+				var message:Object = data.payload;
+				Logger.info(message.body);
+			}
+			
+			/**
+			 *************************
+			 *  JavaScript callbacks
+			 ************************* 
+			 **/
+			
+			private function getDataFromJS(value:String):void {
+				if (value != null || value != "") {
+					connectUrl.text = value;
+				}
+			}
+			
+			private function switchAudio(event:Event):void {
+				Logger.info("switchAudio");
+				if (publishStream == null || mic == null){
+					Logger.info("No stream or mic. Return.");
+					return;
+				}
+				Logger.info("Switching mic...");
+				republishStream(publishStream);
+			}
+			
+			private function switchVideo(event:Event):void {
+				Logger.info("switchVideo");
+				changeRotateBtnState(publishVideo.selected);
+				if (publishStream == null || cam == null){
+					Logger.info("No stream or cam. Return.");
+					return;
+				}
+				Logger.info("Switching cam...");
+				republishStream(publishStream);
+			}
+
+			private function changeRotateBtnState(state:Boolean):void {
+			    rotate0btn.enabled = state;
+                rotate90btn.enabled = state;
+                rotate180btn.enabled = state;
+                rotate270btn.enabled = state;
+			}
+
+			private function republishStream(stream:NetStream):void {
+                disablePublishCheckboxes();
+                disablePublishButtons();
+                scheduledPublish = true;
+                publishStream.publish(null);
+            }
+
+            private function disablePublishCheckboxes():void {
+                publishAudio.enabled = false;
+                publishVideo.enabled = false;
+            }
+
+            private function enablePublishCheckboxes():void {
+                publishAudio.enabled = true;
+                publishVideo.enabled = true;
+            }
+
+            private function enablePublishButtons():void {
+                publishBtn.enabled = true;
+                unpublishBtn.enabled = true;
+            }
+
+            private function disablePublishButtons():void {
+                publishBtn.enabled = false;
+                unpublishBtn.enabled = false;
+            }
+
+            public function onMetaData(info:Object):void {
+                Logger.info("Video orientation " + info.orientation);
+                revertVideoFarEndPos();
+                if (info.orientation == 0) {
+                    videoFarEnd.rotation = 0;
+                } else if (info.orientation == 1) {
+                    videoFarEnd.rotation = 90;
+                    videoFarEnd.x = videoFarEnd.x + videoFarEnd.width;
+                } else if (info.orientation == 2) {
+                    videoFarEnd.rotation = 180;
+                    videoFarEnd.x = videoFarEnd.x + videoFarEnd.width;
+                    videoFarEnd.y = videoFarEnd.y + videoFarEnd.height;
+                } else if (info.orientation == 3) {
+                    videoFarEnd.rotation = 270;
+                    videoFarEnd.y = videoFarEnd.y + videoFarEnd.height;
+                }
+                videoFarEndOrientation = info.orientation;
+            }
+
+            public function revertVideoFarEndPos():void {
+                if (videoFarEndOrientation == 1) {
+                    videoFarEnd.x = videoFarEnd.x - videoFarEnd.width;
+                } else if (videoFarEndOrientation == 2) {
+                    videoFarEnd.x = videoFarEnd.x - videoFarEnd.width;
+                    videoFarEnd.y = videoFarEnd.y - videoFarEnd.height;
+                } else if (videoFarEndOrientation == 3) {
+                    videoFarEnd.y = videoFarEnd.y - videoFarEnd.height;
+                }
+            }
+
+		]]>
+	</fx:Script>
+	<s:Label x="96" y="34" width="265" styleName="header" text="Flash Streaming"/>
+	<!-- connect / disconnect -->
+	<s:Button id="connectBtn" x="325" y="93" width="90" label="Login" click="connect()"/>
+	<s:TextInput id="publishStreamName" x="99" y="143" width="199" text="StreamName"/>
+	<s:Button id="disconnectBtn" x="325" y="93" label="Logout" click="disconnect()" width="90" enabled="true"/>
+	<s:TextInput id="connectUrl" x="99" y="93" width="200"/>
+	
+	<!-- publish / unpublish -->
+	<s:Button id="publishBtn" x="326" y="143" label="Start" width="90" height="21" click="publish()" enabled="true"/>
+	<s:CheckBox id="publishAudio" x="146" y="505" label="audio" change="switchAudio(event)" selected="true"/>
+	<s:CheckBox id="publishVideo" x="223" y="505" label="video" change="switchVideo(event)" selected="true"/>	
+
+    <s:Label x="67" y="540" text="Rotate camera"/>
+    <s:Button id="rotate0btn" x="160" y="531" label="0" width="40" height="21" click="rotate(0)" toolTip="Works on transcoded streams only"/>
+    <s:Button id="rotate90btn" x="210" y="531" label="90" width="40" height="21" click="rotate(90)" toolTip="Works on transcoded streams only"/>
+    <s:Button id="rotate180btn" x="260" y="531" label="180" width="45" height="21" click="rotate(180)" toolTip="Works on transcoded streams only"/>
+    <s:Button id="rotate270btn" x="315" y="531" label="270" width="45" height="21" click="rotate(270)" toolTip="Works on transcoded streams only"/>
+
+	<s:Label x="80" y="631" text="codec"/>
+    <s:DropDownList id="videoCodec" x="67" y="601" width="68" requireSelection="true">
+        <s:dataProvider>
+            <s:ArrayCollection>
+                <fx:String>H264</fx:String>
+                <fx:String>FLV</fx:String>
+            </s:ArrayCollection>
+        </s:dataProvider>
+    </s:DropDownList>
+
+	<s:Label x="140" y="571" text="width"/>
+	<s:TextInput id="camWidth" x="140" y="601" width="32" text="320"/>
+	
+	<s:Label x="179" y="571" text="height"/>
+	<s:TextInput id="camHeight" x="180" y="601" width="31" text="240"/>
+	
+	<s:Label x="226" y="571" text="fps"/>
+	<s:TextInput id="camFPS" x="220" y="601" width="31" text="15"/>
+	
+	<s:Label x="255" y="571" text="quality"/>
+	<s:TextInput id="camQuality" x="260" y="601" width="31" text="80"/>
+	
+	<s:Label x="299" y="571" text="keyframe"/>
+	<s:TextInput id="camKeyFrame" x="300" y="601" width="31" text="15"/>
+	
+	<!-- play / stop -->
+	<s:Button id="playBtn" x="325" y="193" label="Start" width="90" height="21" click="play()" enabled="true"/>
+	
+	<!-- video view -->
+	<mx:Canvas id = "canvas" visible="true" x="65" y="257" width="320" height="240">
+		<mx:VideoDisplay id="videoMy" visible="true" x="0" y="0" width="80" height="60"  chromeColor="#EEA1A1"/>
+	</mx:Canvas>
+	<s:Label x="35" y="143" width="56" height="22" text="Publish" verticalAlign="middle"/>
+	<s:Label x="35" y="93" width="89" height="22" text="Server:" verticalAlign="middle"/>
+	<s:TextInput id="playStreamName" x="99" y="193" width="199" text="StreamName"/>
+	<s:Label x="35" y="193" height="22" text="Play" verticalAlign="middle"/>
+	<s:Button id="unpublishBtn" x="326" y="143" label="Stop" click="unpublish()" width="90" enabled="true"/>
+	<s:Button id="stopBtn" x="325" y="193" label="Stop" width="90" height="21" click="stop()" enabled="true"/>
+	<s:Label id="connectionStatus" x="123" y="119" width="150" height="20" textAlign="center"
+			 verticalAlign="top"/>
+	<s:Label id="publishStatus" x="123" y="169" width="150" height="20" textAlign="center"
+			 verticalAlign="middle"/>
+	<s:Label id="playStatus" x="123" y="219" width="150" height="20" textAlign="center"
+			 verticalAlign="middle"/>
+</s:Application>

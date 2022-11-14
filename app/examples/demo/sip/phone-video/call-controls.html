@@ -1,0 +1,83 @@
+<div id="outgoingCall" class="row row-space">
+    <div class="col-sm-3"></div>
+    <div class="col-sm-6">
+        <div class="input-group">
+            <input id="callee" type="text" class="form-control" placeholder="Callee SIP username"/>
+            <span class="input-group-btn">
+                <button id="callBtn" type="button" class="btn btn-default pull-right">Call</button>
+            </span>
+        </div>
+    </div>
+    <div class="col-sm-3">
+    </div>
+</div>
+
+<div id="incomingCallAlert" class="alert alert-info">
+</div>
+
+<div class="row row-space">
+    <div class="input-group">
+        <span class="input-group-addon">Camera</span>
+        <select class="form-control" id="cameraList">
+        </select>
+        <span class="input-group-btn">
+            <button class="btn btn-default" id="switchCamBtn">Next</button>
+        </span>
+    </div>
+</div>
+
+<div class="row row-space">
+    <div class="input-group">
+        <span class="input-group-addon">Mic</span>
+        <select class="form-control" id="micList">
+        </select>
+        <span class="input-group-btn">
+            <button class="btn btn-default" id="switchMicBtn">Next</button>
+        </span>
+    </div>
+</div>
+
+<div class="row row-space" id="speakerForm">
+    <div class="input-group">
+        <span class="input-group-addon">Speaker</span>
+        <select class="form-control" id="speakerList">
+        </select>
+    </div>
+</div>
+
+<div class="row row-space" id="screenSharingForm">
+    <div class="input-group">
+        <div class="input-group pull-left">
+        <span class="input-group-addon">Screen sharing</span>
+        <span class="input-group-btn">
+            <input id="screenSharingToggle" type="checkbox" disabled/>
+        </span>
+        </div>
+    </div>
+</div>
+
+<div id="callFeatures" class="row row-space">
+    <div class="col-sm-4"></div>
+    <div class="col-sm-4">
+        <button id="holdBtn" type="button" class="btn btn-default">Hold</button>
+        <!--<button id="transferBtn" type="button" class="btn btn-default">Transfer</button>-->
+    </div>
+    <div class="col-sm-4">
+    </div>
+</div>
+
+<div id="incomingCall" class="row row-space">
+    <div class="col-sm-4"></div>
+    <div class="col-sm-4">
+        <button id="answerBtn" type="button" class="btn btn-default">Answer</button>
+        <button id="hangupBtn" type="button" class="btn btn-default">Hangup</button>
+    </div>
+    <div class="col-sm-4">
+    </div>
+</div>
+
+<div class="row row-space">
+    <div class="col-sm-12">
+        <span id="callStatus" class="text-muted"></span>
+    </div>
+</div>

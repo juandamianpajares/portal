@@ -1,0 +1,88 @@
+version: '3.8'
+services:
+  app:
+    container_name: portal_app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - 9000:9000
+    volumes:
+      - ./app:/var/www
+      - ./development/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    networks:
+      - application-network
+
+  composer:
+    container_name: composer
+    image: composer
+    command: /bin/bash "./portal/commands/production/start-composer.sh"
+    volumes:
+      - ./:/app
+    networks:
+      - application-network
+
+  npm:
+    image: node:current-alpine
+    container_name: npm
+    volumes:
+      - ./:/var/www/html
+    user: node
+    entrypoint: ["npm"]
+    working_dir: /var/www/html
+    networks: 
+      - application-network
+
+  nginx-rtmp:
+    container_name: nginx-rtmp
+    image: murderousone/nginx-ffmpeg-rtmp:ubuntu-latest
+    stdin_open: true
+    tty: true
+    ports:
+      - 1935:1935
+      - 80:80
+      - 443:443
+    volumes:
+      - ./nginx-rtmp/www/:/usr/local/nginx/html/
+      - ./development/nginx/:/etc/nginx/
+      #- ./development/nginx/conf.d/:/etc/nginx/conf.d/
+    networks:
+      - application-network
+
+
+  owncast:
+    image: gabekangas/owncast:latest
+    restart: unless-stopped
+    volumes:
+      - .owncast/owncast.yaml:/app/config.yaml
+    command: /app/owncast -configFile=config.yaml
+    ports:
+      - 1936:1935
+      - 8080:8080
+    expose:
+      - "8080/tcp"
+    links:
+      - "nginx-rtmp"
+
+  database:
+    image: mysql:8.0
+    container_name: database
+    command: --default-authentication-plugin=mysql_native_password
+    ports:
+      - 3306:3306
+    environment:
+      MYSQL_DATABASE: live
+      MYSQL_ROOT_PASSWORD: root1234
+    volumes:
+      - data:/var/lib/mysql
+      - ./development/mysql/my.conf:/etc/mysql/my.conf
+    networks:
+      - application-network
+
+networks:
+  application-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local

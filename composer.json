@@ -1,0 +1,10 @@
+{
+    "require": {
+        "pusher/pusher-php-server": "^2.1"
+    },
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true
+        }
+    }
+}

@@ -1,0 +1,60 @@
+<?php
+
+  if(file_exists('config.php') === true)
+  {
+    require_once('config.php');
+  }
+  else
+  {
+	  define('PUSHERAPP_AUTHKEY', getenv('PUSHERAPP_AUTHKEY'));
+	  define('PUSHERAPP_SECRET' , getenv('PUSHERAPP_SECRET'));
+	  define('PUSHERAPP_APPID'  , getenv('PUSHERAPP_APPID'));
+
+	  define('PUSHERAPP_HOST', 'http://api.pusherapp.com');
+  }
+
+	require_once('../lib/Pusher.php');
+
+	class PusherPushTest extends PHPUnit_Framework_TestCase
+	{
+
+		protected function setUp()
+		{
+			if(PUSHERAPP_AUTHKEY == '' || PUSHERAPP_SECRET == '' || PUSHERAPP_APPID == '' )
+			{
+				$this->markTestSkipped('Please set the
+					PUSHERAPP_AUTHKEY, PUSHERAPP_SECRET and
+					PUSHERAPP_APPID keys.');
+			}
+			else
+			{
+				$this->pusher = new Pusher(PUSHERAPP_AUTHKEY, PUSHERAPP_SECRET, PUSHERAPP_APPID, true, PUSHERAPP_HOST);
+			}
+		}
+
+		public function testObjectConstruct()
+		{
+			$this->assertNotNull($this->pusher, 'Created new Pusher object');
+		}
+
+		public function testStringPush()
+		{
+			$string_trigger = $this->pusher->trigger('test_channel', 'my_event', 'Test string');
+			$this->assertTrue($string_trigger, 'Trigger with string payload');
+		}
+
+		public function testArrayPush()
+		{
+			$structure_trigger = $this->pusher->trigger('test_channel', 'my_event', array( 'test' => 1 ));
+			$this->assertTrue($structure_trigger, 'Trigger with structured payload');
+		}
+
+		public function testSendingOver10kBMessageReturns413() {
+			$data = str_pad( '' , 11 * 1024, 'a' );
+			echo( 'sending data of size: ' . mb_strlen( $data, '8bit' ) );
+			$response = $this->pusher->trigger('test_channel', 'my_event', $data, null, true );
+			$this->assertEquals( 413, $response[ 'status' ] , '413 HTTP status response expected');
+		}
+	}
+
+?>
